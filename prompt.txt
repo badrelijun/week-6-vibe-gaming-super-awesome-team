@@ -1,0 +1,1 @@
+inside game.html replace red circles with 'goomba-monster.png'
