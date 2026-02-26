@@ -1,1 +1,27 @@
-inside game.html replace red circles with 'goomba-monster.png'
+inside game.html replace red circles with '8bit-zombie.png'
+
+have the speed of the goombas slowly increase
+
+replace black background with 'city-background.webp' 
+
+replace white text with black text to make it more visible
+
+add pause, restart and resume buttons that can either pause, restart, or resume the game
+
+add powerups such as swords and shields with swords killing the zombies and shields pushing the zombies away and protecting the player from death
+
+powerups get taken away at the end of each round
+
+make zombies start at slow speeds and have them slowly speed up with 5 being the limit
+
+create a round system that asks player to continue after killing all zombies
+
+after each round increase the max amount of zombies with 1 extra
+
+add highscores that show the highest round a player has gotten to
+
+replace the weasel with avatar.png
+
+when game is paused add a text on the screen saying "PAUSED" with a black overlay that has an opacity of around 30%
+
+make it so that when the player dies the screen says "Oh no, you died. Click restart to restart the game and continue fighting off the zombie apocalypse!"

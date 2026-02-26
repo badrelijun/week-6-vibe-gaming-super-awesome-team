@@ -31,7 +31,7 @@
         }
         
         .controls {
-            color: white;
+            color: black;
             text-align: center;
             margin-top: 15px;
             font-size: 14px;
@@ -59,6 +59,12 @@
             <h3>Controls</h3>
             <p>Use <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> keys to move the weasel</p>
         </div>
+        <div class="button-controls" style="text-align:center; margin-top:10px;">
+            <button id="stopBtn">Pause</button>
+            <button id="resumeBtn">Resume</button>
+            <button id="restartBtn">Restart</button>
+            <button id="nextRoundBtn" style="display:none;">Continue</button>
+        </div>
     </div>
 
     <script>
@@ -79,7 +85,11 @@
                     height: 64,
                     speed: 5,
                     image: null,
-                    imageLoaded: false
+                    imageLoaded: false,
+                    shielded: false,
+                    shieldEndTime: null,
+                    hasSword: false,
+                    swordEndTime: null
                 };
                 
                 // Input handling
@@ -94,12 +104,52 @@
                 this.gameState = 'playing'; // 'playing' or 'gameOver'
                 this.gameStartTime = Date.now();
                 this.gameEndTime = null;
+                // Round state
+                this.round = 1;
+                this.zombiesPerRound = 3;
+                this.roundComplete = false;
+                // high score persisted in localStorage
+                this.highScore = parseInt(localStorage.getItem('weasel_high_score')) || 0;
                 
                 // Rings
                 this.rings = [];
                 this.ringSpawnDelay = 3000; // 3 seconds
                 this.lastRingSpawn = 0;
                 this.ringsSpawned = 0;
+                
+                // Shield powerups
+                this.shields = [];
+                this.shieldSpawnDelay = 10000; // spawn a shield every 10 seconds (slower)
+                this.lastShieldSpawn = 0;
+                
+                // Sword powerups
+                this.swords = [];
+                this.swordSpawnDelay = 10000; // spawn a sword every 10 seconds (slower)
+                this.lastSwordSpawn = 0;
+
+                // Shield powerup image
+                this.shieldImage = new Image();
+                this.shieldImageLoaded = false;
+                this.shieldImage.onload = () => {
+                    this.shieldImageLoaded = true;
+                };
+                this.shieldImage.onerror = () => {
+                    console.log('Could not load 8bit-shield.png, falling back to circles');
+                    this.shieldImageLoaded = false;
+                };
+                this.shieldImage.src = '8bit-shield.png';
+                
+                // Sword powerup image
+                this.swordImage = new Image();
+                this.swordImageLoaded = false;
+                this.swordImage.onload = () => {
+                    this.swordImageLoaded = true;
+                };
+                this.swordImage.onerror = () => {
+                    console.log('Could not load 8bit-sword.png, falling back to circles');
+                    this.swordImageLoaded = false;
+                };
+                this.swordImage.src = '8bit-sword.png';
 
                 // Ring image (replaces red circles)
                 this.ringImage = new Image();
@@ -108,12 +158,26 @@
                     this.ringImageLoaded = true;
                 };
                 this.ringImage.onerror = () => {
-                    console.log('Could not load goomba-monster.png, falling back to circles');
+                    console.log('Could not load 8bit-zombie.png, falling back to circles');
                     this.ringImageLoaded = false;
                 };
-                this.ringImage.src = 'goomba-monster.png';
+                this.ringImage.src = '8bit-zombie.png';
+                
+                // load city background image to replace black background
+                this.backgroundImage = new Image();
+                this.backgroundLoaded = false;
+                this.backgroundImage.onload = () => {
+                    this.backgroundLoaded = true;
+                };
+                this.backgroundImage.onerror = () => {
+                    console.log('Could not load city-background.webp, using solid color');
+                    this.backgroundLoaded = false;
+                };
+                this.backgroundImage.src = 'city-background.webp';
                 
                 this.init();
+                // ensure pause flag exists
+                this.isPaused = false;
             }
             // random comment
             init() {
@@ -123,13 +187,14 @@
                     this.player.imageLoaded = true;
                 };
                 this.player.image.onerror = () => {
-                    console.log('Could not load weasel.png, using placeholder');
+                    console.log('Could not load avatar.png, using placeholder');
                     this.player.imageLoaded = false;
                 };
-                this.player.image.src = 'weasel.png';
+                this.player.image.src = 'avatar.png';
                 
                 // Set up event listeners
                 this.setupInputHandlers();
+                this.setupButtonHandlers();
                 
                 // Start game loop
                 this.gameLoop();
@@ -173,14 +238,94 @@
                 });
             }
             
+            // control helpers for buttons
+            stopGame() {
+                this.isPaused = true;
+            }
+            resumeGame() {
+                if (this.gameState !== 'gameOver') {
+                    this.isPaused = false;
+                }
+            }
+            startGame() {
+                // set playing state so update loop runs
+                this.gameState = 'playing';
+                this.rings = [];
+                this.ringsSpawned = 0;
+                this.isPaused = false;
+                this.gameStartTime = Date.now();
+                this.gameEndTime = null;
+                this.rings = [];
+                // reset round state
+                this.round = 1;
+                this.zombiesPerRound = 3;
+                this.roundComplete = false;
+                this.lastRingSpawn = 0;
+                this.ringsSpawned = 0;
+                this.shields = [];
+                this.lastShieldSpawn = 0;
+                this.swords = [];
+                this.lastSwordSpawn = 0;
+                this.player.hasSword = false;
+                this.player.swordEndTime = null;
+                this.player.x = this.gameWidth / 2;
+                this.player.y = this.gameHeight / 2;
+                this.player.speed = 5;
+                this.player.shielded = false;
+                this.player.shieldEndTime = null;
+                this.player.hasSword = false;
+                this.player.swordEndTime = null;
+                // hide continue button if visible
+                const nextBtn = document.getElementById('nextRoundBtn');
+                if (nextBtn) nextBtn.style.display = 'none';
+            }
+            
+            setupButtonHandlers() {
+                const startBtn = document.getElementById('startBtn');
+                const stopBtn = document.getElementById('stopBtn');
+                const resumeBtn = document.getElementById('resumeBtn');
+                const restartBtn = document.getElementById('restartBtn');
+                const nextRoundBtn = document.getElementById('nextRoundBtn');
+                if (startBtn) startBtn.addEventListener('click', () => this.startGame());
+                if (stopBtn) stopBtn.addEventListener('click', () => this.stopGame());
+                if (resumeBtn) resumeBtn.addEventListener('click', () => this.resumeGame());
+                if (restartBtn) restartBtn.addEventListener('click', () => this.startGame());
+                if (nextRoundBtn) nextRoundBtn.addEventListener('click', () => this.continueRound());
+            }
+            
             update() {
-                if (this.gameState === 'gameOver') return;
+                if (this.gameState === 'gameOver' || this.isPaused) return;
                 
-                // Spawn rings every 3 seconds
+                // Spawn rings for the current round
                 const currentTime = Date.now();
-                if (this.ringsSpawned < 3 && currentTime - this.gameStartTime > this.ringSpawnDelay * (this.ringsSpawned + 1)) {
+                if (this.ringsSpawned < this.zombiesPerRound && currentTime - this.lastRingSpawn > this.ringSpawnDelay) {
                     this.spawnRing();
                     this.ringsSpawned++;
+                    this.lastRingSpawn = currentTime;
+                }
+                
+                // Spawn shield powerups every 10 seconds
+                if (currentTime - this.gameStartTime > this.shieldSpawnDelay && currentTime - this.lastShieldSpawn > this.shieldSpawnDelay) {
+                    this.spawnShield();
+                    this.lastShieldSpawn = currentTime;
+                }
+                
+                // Spawn sword powerups every 10 seconds
+                if (currentTime - this.gameStartTime > this.swordSpawnDelay && currentTime - this.lastSwordSpawn > this.swordSpawnDelay) {
+                    this.spawnSword();
+                    this.lastSwordSpawn = currentTime;
+                }
+                
+                // Check if shield has expired
+                if (this.player.shielded && currentTime > this.player.shieldEndTime) {
+                    this.player.shielded = false;
+                    this.player.shieldEndTime = null;
+                }
+                
+                // Check if sword has expired
+                if (this.player.hasSword && currentTime > this.player.swordEndTime) {
+                    this.player.hasSword = false;
+                    this.player.shieldEndTime = null;
                 }
                 
                 // Handle movement
@@ -204,6 +349,12 @@
                 // Update rings
                 this.updateRings();
                 
+                // Update shields
+                this.updateShields();
+                
+                // Update swords
+                this.updateSwords();
+                
                 // Check collisions
                 this.checkCollisions();
             }
@@ -212,12 +363,23 @@
                 // Clear canvas
                 this.ctx.clearRect(0, 0, this.gameWidth, this.gameHeight);
                 
-                // Draw black background
-                this.ctx.fillStyle = '#000';
-                this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
+                // Draw background (city image if available)
+                if (this.backgroundLoaded && this.backgroundImage.complete) {
+                    this.ctx.drawImage(this.backgroundImage, 0, 0, this.gameWidth, this.gameHeight);
+                } else {
+                    // fallback to plain black
+                    this.ctx.fillStyle = '#000';
+                    this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
+                }
                 
                 // Draw rings
                 this.drawRings();
+                
+                // Draw shield powerups
+                this.drawShields();
+                
+                // Draw sword powerups
+                this.drawSwords();
                 
                 // Draw player
                 this.drawPlayer();
@@ -229,24 +391,68 @@
                 if (this.gameState === 'gameOver') {
                     this.drawGameOver();
                 }
+
+                // Draw round complete overlay if needed
+                if (this.roundComplete) {
+                    this.drawRoundComplete();
+                }
+
+                // Draw pause overlay if paused (not during game over or round complete)
+                if (this.isPaused && this.gameState !== 'gameOver' && !this.roundComplete) {
+                    this.drawPause();
+                }
             }
             
             spawnRing() {
                 const ring = {
-                    x: Math.random() * (this.gameWidth - 60),
-                    y: Math.random() * (this.gameHeight - 60),
+                    x: 0,  // spawn from left
+                    y: Math.random() * (this.gameHeight - 60),  // random vertical position
                     radius: 30,
-                    speed: 8 + (this.ringsSpawned * 2), // Ring 1: 8, Ring 2: 10, Ring 3: 12
-                    dx: (Math.random() - 0.5) * 2, // Random direction
+                    // start all zombies at the same base speed
+                    speed: 2, // constant initial velocity for every ring
+                    // Move right across screen
+                    dx: (Math.random() - 0.5) * 2,
                     dy: (Math.random() - 0.5) * 2
                 };
                 
-                // Normalize direction vector
-                const length = Math.sqrt(ring.dx * ring.dx + ring.dy * ring.dy);
-                ring.dx = (ring.dx / length) * ring.speed;
-                ring.dy = (ring.dy / length) * ring.speed;
+                // Normalize direction vector and store for later
+                const length = Math.sqrt(ring.dx * ring.dx + ring.dy * ring.dy) || 1;
+                ring.dirX = ring.dx / length;
+                ring.dirY = ring.dy / length;
+                
+                // Set initial velocity according to speed
+                ring.dx = ring.dirX * ring.speed;
+                ring.dy = ring.dirY * ring.speed;
                 
                 this.rings.push(ring);
+            }
+            
+            spawnShield() {
+                const shield = {
+                    x: Math.random() * (this.gameWidth - 60),
+                    y: Math.random() * (this.gameHeight - 60),
+                    radius: 25
+                };
+                this.shields.push(shield);
+            }
+            
+            spawnSword() {
+                const sword = {
+                    x: Math.random() * (this.gameWidth - 60),
+                    y: Math.random() * (this.gameHeight - 60),
+                    radius: 25
+                };
+                this.swords.push(sword);
+            }
+            
+            updateShields() {
+                // Shields are stationary, just manage their lifetime
+                // For now, they stay until collected
+            }
+            
+            updateSwords() {
+                // Swords are stationary, just manage their lifetime
+                // For now, they stay until collected
             }
             
             updateRings() {
@@ -257,18 +463,26 @@
                     }
                 }
                 
-                // Update ring positions
+                // Update ring positions and slowly increase their speed
                 for (let ring of this.rings) {
+                    // accelerate very slowly, giving a gradual pacing, capped at 5
+                    ring.speed += 0.01;
+                    ring.speed = Math.min(ring.speed, 5);
+                    ring.dx = ring.dirX * ring.speed;
+                    ring.dy = ring.dirY * ring.speed;
+
                     // Move ring
                     ring.x += ring.dx;
                     ring.y += ring.dy;
                     
                     // Bounce off walls
                     if (ring.x - ring.radius <= 0 || ring.x + ring.radius >= this.gameWidth) {
+                        ring.dirX = -ring.dirX; // reverse direction component
                         ring.dx = -ring.dx;
                         ring.x = Math.max(ring.radius, Math.min(this.gameWidth - ring.radius, ring.x));
                     }
                     if (ring.y - ring.radius <= 0 || ring.y + ring.radius >= this.gameHeight) {
+                        ring.dirY = -ring.dirY;
                         ring.dy = -ring.dy;
                         ring.y = Math.max(ring.radius, Math.min(this.gameHeight - ring.radius, ring.y));
                     }
@@ -321,17 +535,93 @@
                 const playerCenterY = this.player.y + this.player.height / 2;
                 const playerRadius = Math.min(this.player.width, this.player.height) / 2;
                 
-                for (let ring of this.rings) {
+                // Check shield powerup collection
+                for (let i = 0; i < this.shields.length; i++) {
+                    const shield = this.shields[i];
+                    const shieldDistance = Math.sqrt(
+                        Math.pow(playerCenterX - shield.x, 2) + 
+                        Math.pow(playerCenterY - shield.y, 2)
+                    );
+                    
+                    if (shieldDistance < playerRadius + shield.radius) {
+                        // Collect shield powerup
+                        this.player.shielded = true;
+                        this.player.shieldEndTime = Date.now() + 5000; // 5 second shield
+                        this.shields.splice(i, 1);
+                        i--;
+                    }
+                }
+                
+                // Check sword powerup collection
+                for (let i = 0; i < this.swords.length; i++) {
+                    const sword = this.swords[i];
+                    const swordDistance = Math.sqrt(
+                        Math.pow(playerCenterX - sword.x, 2) + 
+                        Math.pow(playerCenterY - sword.y, 2)
+                    );
+                    
+                    if (swordDistance < playerRadius + sword.radius) {
+                        // Collect sword powerup
+                        this.player.hasSword = true;
+                        this.player.swordEndTime = Date.now() + 5000; // 5 second sword
+                        this.swords.splice(i, 1);
+                        i--;
+                    }
+                }
+                
+                // Check ring collisions
+                for (let i = 0; i < this.rings.length; i++) {
+                    const ring = this.rings[i];
                     const distance = Math.sqrt(
                         Math.pow(playerCenterX - ring.x, 2) + 
                         Math.pow(playerCenterY - ring.y, 2)
                     );
                     
                     if (distance < playerRadius + ring.radius) {
-                        this.gameState = 'gameOver';
-                        this.gameEndTime = Date.now();
+                        if (this.player.hasSword) {
+                            // Sword kills the zombie
+                            this.rings.splice(i, 1);
+                            i--;
+                        } else if (this.player.shielded) {
+                            // Shield pushes zombie away and is consumed
+                            // Push zombie away from player
+                            const dx = ring.x - playerCenterX;
+                            const dy = ring.y - playerCenterY;
+                            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                            ring.x += (dx / dist) * 100;
+                            ring.y += (dy / dist) * 100;
+                            // Consume shield
+                            this.player.shielded = false;
+                            this.player.shieldEndTime = null;
+                            // when shield pushes zombie away, keep round progress unchanged (zombie removed then respawn later if needed)
+                            // do not decrement ringsSpawned here; the round counts spawned zombies
+                        } else {
+                            // Game over
+                            this.gameState = 'gameOver';
+                            this.gameEndTime = Date.now();
+                        }
                         return;
                     }
+                }
+
+                // If all zombies for this round are cleared, mark round complete
+                if (this.rings.length === 0 && this.ringsSpawned >= this.zombiesPerRound && !this.roundComplete) {
+                    this.roundComplete = true;
+                    this.isPaused = true;
+                    // remove any active player powerups so player must recollect next round
+                    this.player.shielded = false;
+                    this.player.shieldEndTime = null;
+                    this.player.hasSword = false;
+                    this.player.swordEndTime = null;
+                    // clear any spawned powerups on the field
+                    this.shields = [];
+                    this.swords = [];
+                    // update and persist high score (highest completed round)
+                    this.highScore = Math.max(this.highScore, this.round);
+                    try { localStorage.setItem('weasel_high_score', String(this.highScore)); } catch (e) {}
+                    // show continue button
+                    const nextBtn = document.getElementById('nextRoundBtn');
+                    if (nextBtn) nextBtn.style.display = 'inline-block';
                 }
             }
             
@@ -360,18 +650,50 @@
                 }
             }
             
-            drawBackground() {
-                // Create a simple grass pattern
-                this.ctx.fillStyle = '#2ecc71';
-                this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
-                
-                // Add some texture with darker green dots
-                this.ctx.fillStyle = '#27ae60';
-                for (let x = 0; x < this.gameWidth; x += 20) {
-                    for (let y = 0; y < this.gameHeight; y += 20) {
-                        if (Math.random() > 0.7) {
-                            this.ctx.fillRect(x, y, 2, 2);
-                        }
+            drawShields() {
+                if (this.shieldImageLoaded && this.shieldImage.complete) {
+                    // Draw shields with the image
+                    for (let shield of this.shields) {
+                        this.ctx.drawImage(
+                            this.shieldImage,
+                            shield.x - shield.radius,
+                            shield.y - shield.radius,
+                            shield.radius * 2,
+                            shield.radius * 2
+                        );
+                    }
+                } else {
+                    // Fallback to yellow circles if image isn't ready
+                    this.ctx.fillStyle = '#ffff00';
+                    
+                    for (let shield of this.shields) {
+                        this.ctx.beginPath();
+                        this.ctx.arc(shield.x, shield.y, shield.radius, 0, Math.PI * 2);
+                        this.ctx.fill();
+                    }
+                }
+            }
+            
+            drawSwords() {
+                if (this.swordImageLoaded && this.swordImage.complete) {
+                    // Draw swords with the image
+                    for (let sword of this.swords) {
+                        this.ctx.drawImage(
+                            this.swordImage,
+                            sword.x - sword.radius,
+                            sword.y - sword.radius,
+                            sword.radius * 2,
+                            sword.radius * 2
+                        );
+                    }
+                } else {
+                    // Fallback to red circles if image isn't ready
+                    this.ctx.fillStyle = '#ff6666';
+                    
+                    for (let sword of this.swords) {
+                        this.ctx.beginPath();
+                        this.ctx.arc(sword.x, sword.y, sword.radius, 0, Math.PI * 2);
+                        this.ctx.fill();
                     }
                 }
             }
@@ -405,32 +727,66 @@
                     this.ctx.fillRect(this.player.x + 28, this.player.y + 30, 6, 4);
                     
                     // Label
-                    this.ctx.fillStyle = '#fff';
+                    this.ctx.fillStyle = '#000';
                     this.ctx.font = '12px Arial';
                     this.ctx.textAlign = 'center';
+                }
+                
+                // Draw shield indicator if active
+                if (this.player.shielded) {
+                    const centerX = this.player.x + this.player.width / 2;
+                    const centerY = this.player.y + this.player.height / 2;
+                    this.ctx.strokeStyle = '#0099ff';
+                    this.ctx.lineWidth = 3;
+                    this.ctx.beginPath();
+                    this.ctx.arc(centerX, centerY, 45, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                }
+                
+                // Draw sword indicator if active
+                if (this.player.hasSword) {
+                    const centerX = this.player.x + this.player.width / 2;
+                    const centerY = this.player.y + this.player.height / 2;
+                    this.ctx.strokeStyle = '#ff9900';
+                    this.ctx.lineWidth = 3;
+                    this.ctx.beginPath();
+                    this.ctx.arc(centerX, centerY, 50, 0, Math.PI * 2);
+                    this.ctx.stroke();
                 }
             }
             
             drawUI() {
                 // Draw position indicator
                 this.ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-                this.ctx.fillRect(10, 10, 200, 80);
+                // taller box to include round/high score
+                this.ctx.fillRect(10, 10, 200, 120);
                 
-                this.ctx.fillStyle = '#fff';
+                this.ctx.fillStyle = '#000';
                 this.ctx.font = '14px Arial';
                 this.ctx.textAlign = 'left';
                 this.ctx.fillText(`Position: ${Math.round(this.player.x)}, ${Math.round(this.player.y)}`, 20, 30);
-                this.ctx.fillText(`Speed: ${this.player.speed}`, 20, 50);
-                this.ctx.fillText(`Rings: ${this.rings.length}/3`, 20, 70);
+                // display representative ring speed (all rings share same base speed)
+                let avgSpeed = 0;
+                if (this.rings.length > 0) {
+                    let total = 0;
+                    for (let r of this.rings) total += r.speed;
+                    avgSpeed = total / this.rings.length;
+                }
+                this.ctx.fillText(`Speed: ${avgSpeed.toFixed(1)}`, 20, 50);
+                this.ctx.fillText(`Zombies: ${this.rings.length}/${this.zombiesPerRound}`, 20, 70);
+                this.ctx.fillText(`Round: ${this.round}`, 20, 90);
+                this.ctx.fillText(`High: ${this.highScore}`, 20, 110);
                 
                 // Draw survival time
                 const currentTime = this.gameState === 'gameOver' ? this.gameEndTime : Date.now();
                 const survivalTime = Math.floor((currentTime - this.gameStartTime) / 1000);
                 this.ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
                 this.ctx.fillRect(this.gameWidth - 120, 10, 110, 30);
-                this.ctx.fillStyle = '#fff';
+                this.ctx.fillStyle = '#000';
                 this.ctx.textAlign = 'right';
                 this.ctx.fillText(`Time: ${survivalTime}s`, this.gameWidth - 20, 30);
+
+                // (kept original canvas HUD only)
             }
             
             drawGameOver() {
@@ -438,19 +794,54 @@
                 this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
                 this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
                 
-                // Draw game over text
+                // Draw death message and restart instruction
                 this.ctx.fillStyle = '#ff0000';
                 this.ctx.font = 'bold 48px Arial';
                 this.ctx.textAlign = 'center';
-                this.ctx.fillText('GAME OVER', this.gameWidth / 2, this.gameHeight / 2 - 40);
-                
-                const survivalTime = Math.floor((this.gameEndTime - this.gameStartTime) / 1000);
+                this.ctx.fillText('Oh no, you died.', this.gameWidth / 2, this.gameHeight / 2 - 20);
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '20px Arial';
+                const msg = 'Click Restart to restart the game and continue fighting off the zombie apocalypse!';
+                // wrap or center the message; draw in two lines if too long
+                this.ctx.fillText(msg, this.gameWidth / 2, this.gameHeight / 2 + 20);
+            }
+
+            drawRoundComplete() {
+                // overlay asking player to continue
+                this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
                 this.ctx.fillStyle = '#fff';
-                this.ctx.font = '24px Arial';
-                this.ctx.fillText(`You survived ${survivalTime} seconds!`, this.gameWidth / 2, this.gameHeight / 2 + 20);
-                
-                this.ctx.font = '18px Arial';
-                this.ctx.fillText('Refresh to play again', this.gameWidth / 2, this.gameHeight / 2 + 60);
+                this.ctx.font = 'bold 48px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('ROUND COMPLETED', this.gameWidth / 2, this.gameHeight / 2 - 20);
+                this.ctx.font = '20px Arial';
+                this.ctx.fillText('Click Continue to start the next round', this.gameWidth / 2, this.gameHeight / 2 + 20);
+            }
+
+            drawPause() {
+                // semi-transparent black overlay ~30% opacity
+                this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                this.ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
+                // PAUSE label
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = 'bold 48px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('PAUSE', this.gameWidth / 2, this.gameHeight / 2);
+            }
+
+            continueRound() {
+                // hide continue button
+                const nextBtn = document.getElementById('nextRoundBtn');
+                if (nextBtn) nextBtn.style.display = 'none';
+
+                // increment round and make next round slightly harder
+                this.round += 1;
+                this.zombiesPerRound += 1; // increase zombies each round
+                this.ringsSpawned = 0;
+                this.lastRingSpawn = 0;
+                this.roundComplete = false;
+                this.isPaused = false;
             }
             
             gameLoop() {
@@ -462,7 +853,7 @@
         
         // Start the game when page loads
         window.addEventListener('load', () => {
-            new WeaselGame();
+            window.game = new WeaselGame();
         });
     </script>
 </body>
